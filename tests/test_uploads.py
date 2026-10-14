@@ -187,7 +187,11 @@ def test_csv_tsv_uploads_convert_to_sqlite_and_query_same_active_schema(setup):
     assert result["original_filename"] == "sales.csv"
     assert result["schema"]["tables"]["sales"]["columns"]["id"]["type"] == "INTEGER"
     assert result["schema"]["tables"]["sales"]["columns"]["amount"]["type"] == "REAL"
-    assert main.databases(request_for(session), Response())["databases"][-1]["source_type"] == "csv"
+    listed = main.databases(request_for(session), Response())
+    assert listed["databases"][-1]["source_type"] == "csv"
+    assert listed["max_upload_bytes"] == get_settings().max_upload_bytes
+    assert listed["max_import_cells"] == get_settings().max_import_cells
+    assert listed["max_import_rows"] == get_settings().max_import_rows
     query = run_query("show imported rows", lambda *args: ModelQuery(sql="SELECT id, name, amount FROM sales WHERE created >= '2026-09-01' AND created < '2026-10-01' ORDER BY amount DESC LIMIT 1", explanation="show imported rows"), session_id=session)
     assert query["status"] == "success"
     assert query["rows"] == [{"id":1,"name":"Avery","amount":12.5}]
@@ -195,6 +199,17 @@ def test_csv_tsv_uploads_convert_to_sqlite_and_query_same_active_schema(setup):
     tsv = upload(session, "people.tsv", "person\tactive\nLee\t1\n".encode())
     assert tsv["schema"]["tables"]["people"]["columns"]["person"]["type"] == "TEXT"
     assert tsv["schema"]["tables"]["people"]["columns"]["active"]["type"] == "INTEGER"
+
+
+def test_csv_blank_and_duplicate_headers_are_imported_with_generated_names(setup):
+    session = "6" * 32
+    result = upload(session, "departments.csv", b"id,,Name,name\n1,Sales,Sales dept,Alias\n")
+    columns = result["schema"]["tables"]["departments"]["columns"]
+    assert list(columns) == ["id", "column_2", "Name", "name_2"]
+    query = run_query("show imported columns", lambda *args: ModelQuery(
+        sql='SELECT id, column_2, "Name", name_2 FROM departments', explanation="show row"), session_id=session)
+    assert query["status"] == "success"
+    assert query["rows"] == [{"id":1,"column_2":"Sales","Name":"Sales dept","name_2":"Alias"}]
 
 
 def test_xlsx_imports_each_nonempty_sheet_and_rejects_formulas_and_merged_cells(setup):
@@ -231,7 +246,6 @@ def test_xlsx_imports_each_nonempty_sheet_and_rejects_formulas_and_merged_cells(
 
 
 @pytest.mark.parametrize("filename,content,expected", [
-    ("bad.csv", b"name,name\na,b\n", "unique"),
     ("bad.csv", b"name\n\xff\n", "utf-8"),
     ("bad.csv", b"name\nA,B\n", "more fields"),
     ("bad.json", b"{}", "choose a sqlite"),

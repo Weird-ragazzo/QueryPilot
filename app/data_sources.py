@@ -10,6 +10,9 @@ import sqlite3
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
+from threading import RLock
+from contextlib import contextmanager
+from functools import wraps
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +23,38 @@ SESSION_RE = re.compile(r"^[0-9a-f]{32}$")
 SQLITE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 TABULAR_SUFFIXES = {".csv", ".tsv", ".xlsx"}
 SUPPORTED_SUFFIXES = SQLITE_SUFFIXES | TABULAR_SUFFIXES
+_registry_guard = RLock()
+_registry_locks: dict[str, RLock] = {}
+_source_locks_guard = RLock()
+_source_locks: dict[tuple[str, str], RLock] = {}
+
+
+def _serialized_registry(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        session_id = args[0] if args else kwargs.get("session_id", "")
+        key = hashlib.sha256(session_id.encode()).hexdigest()
+        with _registry_guard:
+            lock = _registry_locks.setdefault(key, RLock())
+        with lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
+
+@contextmanager
+def lock_sources(session_id: str, source_ids: list[str]):
+    """Keep selected files present for a query; deletion waits for active reads."""
+    locks = []
+    with _source_locks_guard:
+        for source_id in sorted(set(source_ids)):
+            locks.append(_source_locks.setdefault((hashlib.sha256(session_id.encode()).hexdigest(), source_id), RLock()))
+    for lock in locks:
+        lock.acquire()
+    try:
+        yield
+    finally:
+        for lock in reversed(locks):
+            lock.release()
 
 
 class DataSourceError(ValueError):
@@ -219,14 +254,24 @@ def _save_registry(session_id: str, data: dict) -> None:
 
 
 def _column_names(header) -> list[str]:
-    names = [str(value) if value is not None else "" for value in header]
-    if not names or any(not name.strip() or "\x00" in name for name in names):
-        raise DataSourceError("The first row must contain a non-empty name for every column.")
-    folded = [name.casefold() for name in names]
-    if len(set(folded)) != len(folded):
-        raise DataSourceError("Column names must be unique (SQLite treats names that differ only by case as duplicates).")
-    if len(names) > 500:
+    raw_names = [str(value).strip() if value is not None else "" for value in header]
+    if not raw_names or any("\x00" in name for name in raw_names):
+        raise DataSourceError("The header row is invalid. Remove any null characters and try again.")
+    if len(raw_names) > 500:
         raise DataSourceError("This file has too many columns (maximum 500).")
+    # Real spreadsheets often contain blank or repeated headings. Keep the
+    # user's rows and make those headings deterministic, unique identifiers.
+    names: list[str] = []
+    used: set[str] = set()
+    for index, raw_name in enumerate(raw_names, start=1):
+        base = raw_name or f"column_{index}"
+        candidate = base
+        suffix = 2
+        while candidate.casefold() in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        names.append(candidate)
+        used.add(candidate.casefold())
     return names
 
 
@@ -381,7 +426,10 @@ def list_databases(session_id: str) -> dict:
     state = _load_registry(session_id)
     dbs = [{"id": "sample", "name": "Retail demo data", "is_sample": True, "source_type": "sample", "original_filename": None}]
     dbs.extend({"id": key, "name": item["name"], "is_sample": False, "source_type": item.get("source_type", "sqlite"), "original_filename": item.get("original_filename", item["name"])} for key, item in state["databases"].items())
-    return {"active_id": state["active"], "databases": dbs, "max_upload_bytes": get_settings().max_upload_bytes}
+    settings = get_settings()
+    return {"active_id": state["active"], "databases": dbs, "max_upload_bytes": settings.max_upload_bytes,
+            "max_import_rows": settings.max_import_rows, "max_import_sheets": settings.max_import_sheets,
+            "max_import_cells": settings.max_import_cells}
 
 
 def resolve_database(session_id: str, database_id: str | None = None) -> DatabaseRef:
@@ -415,6 +463,7 @@ def active_database(session_id: str) -> dict:
             "original_filename": ref.schema.get("original_filename"), "schema": ref.schema}
 
 
+@_serialized_registry
 def select_database(session_id: str, database_id: str) -> dict:
     state = _load_registry(session_id)
     if database_id != "sample" and database_id not in state["databases"]:
@@ -426,6 +475,7 @@ def select_database(session_id: str, database_id: str) -> dict:
     return active_database(session_id)
 
 
+@_serialized_registry
 def register_upload(session_id: str, filename: str, content: bytes, max_bytes: int, max_databases: int) -> dict:
     suffix = Path(filename or "").suffix.lower()
     if suffix not in SUPPORTED_SUFFIXES:
@@ -480,4 +530,26 @@ def register_upload(session_id: str, filename: str, content: bytes, max_bytes: i
         temp_path.unlink(missing_ok=True)
         final_path.unlink(missing_ok=True)
         raise
+
+
+@_serialized_registry
+def delete_database(session_id: str, database_id: str) -> dict:
+    if database_id == "sample":
+        raise DataSourceError("The bundled sample database cannot be deleted.")
+    state = _load_registry(session_id)
+    item = state["databases"].get(database_id)
+    if not item:
+        raise DataSourceError("That database is not available in this session.")
+    with lock_sources(session_id, [database_id]):
+        directory = _session_dir(session_id).resolve()
+        path = (directory / item["file"]).resolve()
+        if path.parent != directory or path.name != item["file"]:
+            raise DataSourceError("That database is not available in this session.")
+        state["databases"].pop(database_id)
+        if state.get("active") == database_id:
+            state["active"] = "sample"
+        _save_registry(session_id, state)
+        path.unlink(missing_ok=True)
+        # Generated tabular uploads may leave only the one registered SQLite file.
+        return list_databases(session_id)
 
