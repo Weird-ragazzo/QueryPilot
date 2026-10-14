@@ -46,3 +46,14 @@ def test_ambiguous_unqualified_join_column_is_rejected():
     sql = "SELECT customer_id FROM orders JOIN customers ON orders.customer_id = customers.customer_id"
     with pytest.raises(SQLRejected, match="ambiguous column"):
         validate_sql(sql)
+
+
+def test_validation_allows_only_views_in_canonical_view_schema():
+    schema = {
+        "tables": {"employee": {"columns": {"full_name": {}, "department_id": {}}}},
+        "views": {"employee_directory": {"columns": {"full_name": {}, "department_name": {}}}},
+    }
+    assert "employee_directory" in validate_sql("SELECT full_name FROM employee_directory", schema)
+    for sql in ("SELECT private_note FROM employee_directory", "SELECT * FROM unapproved_view"):
+        with pytest.raises(SQLRejected):
+            validate_sql(sql, schema)

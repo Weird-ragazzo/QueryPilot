@@ -12,6 +12,7 @@ node_modules/
 dist/
 *.sqlite3
 *.db
+data/uploads/
 reports/*.json
 !reports/.gitkeep
 

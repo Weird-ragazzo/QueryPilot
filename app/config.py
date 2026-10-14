@@ -19,8 +19,11 @@ class Settings:
         self.nvidia_model = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b").strip()
         self.max_rows = int(os.getenv("MAX_RESULT_ROWS", "200"))
         self.query_timeout_ms = int(os.getenv("QUERY_TIMEOUT_MS", "2000"))
-        self.max_upload_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
-        self.max_databases_per_session = int(os.getenv("MAX_DATABASES_PER_SESSION", "5"))
+        self.max_upload_bytes = max(1, min(int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024))), 100 * 1024 * 1024))
+        self.max_databases_per_session = max(1, min(int(os.getenv("MAX_DATABASES_PER_SESSION", "5")), 20))
+        self.max_import_rows = max(1, min(int(os.getenv("MAX_IMPORT_ROWS", "100000")), 1_000_000))
+        self.max_import_sheets = max(1, min(int(os.getenv("MAX_IMPORT_SHEETS", "20")), 100))
+        self.max_import_cells = max(1, min(int(os.getenv("MAX_IMPORT_CELLS", "2000000")), 10_000_000))
 
 
 @lru_cache

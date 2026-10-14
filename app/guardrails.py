@@ -8,6 +8,10 @@ class SQLRejected(ValueError):
     pass
 
 
+class SQLWriteRejected(SQLRejected):
+    """A parsed statement was rejected because it is not a read-only SELECT."""
+
+
 def validate_sql(sql: str, schema: dict | None = None) -> str:
     if not sql or len(sql) > 8000:
         raise SQLRejected("Generated SQL is empty or too long.")
@@ -19,17 +23,23 @@ def validate_sql(sql: str, schema: dict | None = None) -> str:
         raise SQLRejected("Only one SQL statement is allowed.")
     tree = statements[0]
     if not isinstance(tree, exp.Select):
-        raise SQLRejected("Only read-only SELECT queries are allowed.")
+        raise SQLWriteRejected("Only read-only SELECT queries are allowed.")
     for node in tree.walk():
         if isinstance(node, (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter, exp.Command, exp.Transaction, exp.Merge, exp.Pragma)):
             raise SQLRejected("This SQL operation is not allowed.")
 
     allowed_schema = schema.get("tables", {}) if schema else ALLOWED_SCHEMA
-    # Canonical introspection represents columns as metadata objects. Keep
-    # compatibility with the demo schema's earlier name-to-type form.
+    allowed_views = schema.get("views", {}) if schema else {}
+    # Canonical introspection represents columns as metadata objects. Views
+    # are a separate namespace so approved views can be distinguished from
+    # physical tables at validation and execution time.
     columns_by_table = {
         table.casefold(): {name.casefold() for name in (meta.get("columns", meta) if isinstance(meta, dict) else {})}
         for table, meta in allowed_schema.items()
+    }
+    columns_by_view = {
+        view.casefold(): {name.casefold() for name in meta.get("columns", {})}
+        for view, meta in allowed_views.items()
     }
     scopes = list(traverse_scope(tree))
     if not scopes:
@@ -38,9 +48,14 @@ def validate_sql(sql: str, schema: dict | None = None) -> str:
     def source_columns(source: exp.Table | Scope) -> set[str]:
         if isinstance(source, exp.Table):
             table_name = source.name.casefold()
-            if table_name not in columns_by_table:
+            if source.db or source.catalog:
+                raise SQLRejected("Query references a database object that is not available.")
+            if table_name in columns_by_table:
+                return columns_by_table[table_name]
+            if table_name in columns_by_view:
+                return columns_by_view[table_name]
+            else:
                 raise SQLRejected("Query references a table that is not available.")
-            return columns_by_table[table_name]
         return output_columns(source)
 
     def output_columns(scope: Scope) -> set[str]:

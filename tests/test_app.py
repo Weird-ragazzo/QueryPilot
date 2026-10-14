@@ -62,6 +62,8 @@ def test_unsafe_model_sql_is_never_executed(db):
     before = db.read_bytes()
     result = workflow.run_query("do something", lambda *args: ModelQuery(sql="DROP TABLE customers", explanation="Drop."))
     assert result["status"] == "refused"
+    assert result["error_code"] == "READ_ONLY_OPERATION_BLOCKED"
+    assert result["error"] == "Request blocked: QueryPilot only supports read-only analytics. No database changes were made."
     assert db.read_bytes() == before
 
 
@@ -89,28 +91,80 @@ def test_failed_correction_is_not_repeated(db):
 
 
 def test_health_and_schema_endpoints(db):
+    from starlette.requests import Request
+    from starlette.responses import Response
     from app.main import health, schema
+    request = Request({"type":"http","headers":[(b"x-querypilot-session",b"1"*32)],"method":"GET","path":"/api/schema","query_string":b"","server":("test",80),"client":("test",1),"scheme":"http","http_version":"1.1"})
     assert health() == {"status": "ok"}
-    result = schema()
+    result = schema(request, Response())
     assert set(result["tables"]) == {"customers", "products", "orders", "order_items"}
-    assert result["tables"]["customers"]["created_at"] == "TEXT"
+    assert result["tables"]["customers"]["columns"]["created_at"]["type"] == "TEXT"
+    assert result["tables"]["customers"]["primary_keys"] == ["customer_id"]
 
 
 def test_query_endpoint_preserves_response_and_handles_model_errors(monkeypatch):
+    import asyncio
+    from starlette.requests import Request
+    from starlette.responses import Response
     from app import main
-    from fastapi import Response
-    monkeypatch.setattr(main, "run_query", lambda question: {"status": "error", "error": "The language model request timed out.", "attempts": 0})
-    http_response = Response()
-    result = main.query(QueryRequest(question="Revenue total"), http_response)
+    monkeypatch.setattr(main, "run_query", lambda question, **kwargs: {"status": "error", "error": "The language model request timed out.", "attempts": 0})
+    request = Request({"type":"http","headers":[],"method":"POST","path":"/api/query","query_string":b"","server":("test",80),"client":("test",1),"scheme":"http","http_version":"1.1"})
+    response = Response()
+    result = main.query(QueryRequest(question="Revenue total"), response, request)
     assert result.status == "error"
     assert result.error == result.summary
     assert result.sql is None
-    assert http_response.status_code == 503
+    assert response.status_code == 503
 
 
 def test_question_length_validation():
     with pytest.raises(Exception): QueryRequest(question="ab")
     with pytest.raises(Exception): QueryRequest(question="x" * 1001)
+
+
+@pytest.mark.parametrize("question", [
+    "delete all departments",
+    "update every employee's role",
+    "drop the department table",
+])
+def test_destructive_questions_are_blocked_before_generation_or_database_execution(db, monkeypatch, question):
+    from app import main
+    from starlette.responses import Response
+
+    con = sqlite3.connect(db)
+    con.executescript("CREATE TABLE departments(id INTEGER PRIMARY KEY, name TEXT); INSERT INTO departments VALUES(1, 'Engineering'); CREATE TABLE employees(id INTEGER PRIMARY KEY, role TEXT); INSERT INTO employees VALUES(1, 'Analyst');")
+    con.commit(); con.close()
+    original = db.read_bytes()
+    model_calls, database_opens = [], []
+
+    def model(*args, **kwargs):
+        model_calls.append(args)
+        return ModelQuery(sql="SELECT 1", explanation="should not run")
+
+    def open_database(*args, **kwargs):
+        database_opens.append(args)
+        raise AssertionError("database execution must not be reached")
+
+    monkeypatch.setattr(main, "run_query", lambda text, **kwargs: workflow.run_query(text, model_fn=model, **kwargs))
+    monkeypatch.setattr(workflow, "open_readonly", open_database)
+    from starlette.requests import Request
+    http_request = Request({"type":"http","headers":[(b"x-querypilot-session",b"a"*32)],"method":"POST","path":"/api/query","query_string":b"","server":("test",80),"client":("test",1),"scheme":"http","http_version":"1.1"})
+    http_response = Response()
+    result = main.query(QueryRequest(question=question), http_response, http_request)
+    body = result.model_dump()
+    assert http_response.status_code == 403
+    assert body["status"] == "refused"
+    assert body["error_code"] == "READ_ONLY_OPERATION_BLOCKED"
+    assert body["error"] == "Request blocked: QueryPilot only supports read-only analytics. No database changes were made."
+    assert body["summary"] == body["error"]
+    assert model_calls == []
+    assert database_opens == []
+    assert db.read_bytes() == original
+
+
+def test_malformed_query_payload_keeps_pydantic_validation(db):
+    with pytest.raises(Exception):
+        QueryRequest(question="ab")
 
 
 def workflow_app():

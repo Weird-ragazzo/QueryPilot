@@ -15,6 +15,7 @@ class QueryResponse(BaseModel):
     duration_ms: float = 0
     correction_attempts: int = 0
     error: str | None = None
+    error_code: str | None = None
 
 
 class ModelQuery(BaseModel):
@@ -26,18 +27,23 @@ class DatabaseItem(BaseModel):
     id: str
     name: str
     is_sample: bool
+    source_type: str = "sqlite"
+    original_filename: str | None = None
 
 
 class DatabaseListResponse(BaseModel):
     active_id: str
     databases: list[DatabaseItem]
+    max_upload_bytes: int = 26214400
 
 
 class ActiveDatabaseResponse(BaseModel):
     id: str
     name: str
     is_sample: bool
-    schema: dict[str, Any]
+    source_type: str = "sqlite"
+    original_filename: str | None = None
+    schema_: dict[str, Any] = Field(alias="schema")
 
 
 class DatabaseSelectRequest(BaseModel):

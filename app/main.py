@@ -76,17 +76,19 @@ def activate(body: DatabaseSelectRequest, request: Request, response: Response):
 
 
 @app.post("/api/databases/upload", response_model=ActiveDatabaseResponse)
-async def upload(request: Request, response: Response, file: UploadFile = File(...)):
+def upload(request: Request, response: Response, file: UploadFile = File(...)):
     session_id = session_for(request, response)
     try:
-        content = await file.read(settings.max_upload_bytes + 1)
+        # Multipart files are already spooled by Starlette; the sync route runs
+        # in FastAPI's worker pool and reads only one byte beyond the configured limit.
+        content = file.file.read(settings.max_upload_bytes + 1)
         if len(content) > settings.max_upload_bytes:
             raise DataSourceError(f"The database file exceeds the {settings.max_upload_bytes // (1024 * 1024)} MB upload limit.")
         return register_upload(session_id, file.filename or "", content, settings.max_upload_bytes, settings.max_databases_per_session)
     except DataSourceError as exc:
         raise api_error(exc) from None
     finally:
-        await file.close()
+        file.file.close()
 
 
 @app.get("/api/history")
@@ -106,10 +108,10 @@ def query(request: QueryRequest, response: Response, http_request: Request):
     if status == "success":
         history.appendleft({"question": " ".join(request.question.split()), "summary": summary})
     elif status == "refused":
-        response.status_code = 422
+        response.status_code = 403 if result.get("error_code") == "READ_ONLY_OPERATION_BLOCKED" else 422
     elif status == "error":
         response.status_code = 503 if any(term in summary.lower() for term in ("language model", "gemini model", "gemini api key", "nvidia", "model provider", "model api key")) else 422
     return QueryResponse(status=status, summary=summary, sql=result.get("sql") if status == "success" else None,
                          columns=result.get("columns", []), rows=result.get("rows", []),
                          duration_ms=result.get("duration_ms", 0), correction_attempts=result.get("attempts", 0),
-                         error=result.get("error"))
+                         error=result.get("error"), error_code=result.get("error_code"))

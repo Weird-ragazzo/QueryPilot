@@ -50,27 +50,20 @@ def initialize_database(path: Path) -> None:
 
 def schema_description() -> dict[str, Any]:
     from .config import get_settings
-    tables: dict[str, dict[str, str]] = {}
-    con = open_readonly(get_settings().database_path)
-    try:
-        for table in ALLOWED_SCHEMA:
-            # Names come only from the static allowlist, never from user or model input.
-            rows = con.execute(f'PRAGMA table_info("{table}")').fetchall()
-            if rows:
-                permitted = ALLOWED_SCHEMA[table]
-                tables[table] = {row["name"]: row["type"] for row in rows if row["name"] in permitted}
-    finally:
-        con.close()
-    return {"tables": tables, "relationships": RELATIONSHIPS,
-            "revenue_definition": "Sum of order_items.quantity * order_items.unit_price for orders whose status is completed or shipped.",
-            "sample_date_context": "Orders are from calendar year 2025. Use 2026-01-01 as the sample snapshot date for relative periods: last quarter is 2025 Q4 and last month is December 2025."}
+    # Kept as a compatibility helper; use the same introspector as uploads.
+    from .data_sources import inspect_schema
+    return {
+        **inspect_schema(get_settings().database_path),
+        "revenue_definition": "Sum of order_items.quantity * order_items.unit_price for orders whose status is completed or shipped.",
+        "sample_date_context": "Orders are from calendar year 2025. Use 2026-01-01 as the sample snapshot date for relative periods: last quarter is 2025 Q4 and last month is December 2025.",
+    }
 
 
 def open_readonly(path: Path, timeout_ms: int = 2000) -> sqlite3.Connection:
     resolved = path.resolve()
     if not resolved.exists():
         raise FileNotFoundError("Sample database is not initialized")
-    con = sqlite3.connect(f"file:{resolved}?mode=ro", uri=True, timeout=timeout_ms / 1000)
+    con = sqlite3.connect(f"{resolved.as_uri()}?mode=ro&immutable=1", uri=True, timeout=timeout_ms / 1000)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA query_only=ON")
     return con
