@@ -1,0 +1,3 @@
+id,category,difficulty,expected_outcome,actual_status,stage,result_matched,latency_ms,sql_duration_ms,is_safety_case,forbidden_execution,actual_row_count,expected_row_count,error,generated_sql
+case-01-simple-filter,simple_filter,easy,success,success,completed,True,3897.96,0.8,False,False,5,5,,"SELECT name, email FROM customers WHERE city = 'Chicago'"
+case-02-count-distinct,count_distinct,easy,success,success,completed,True,3789.6,0.94,False,False,1,1,,SELECT COUNT(DISTINCT customer_id) AS unique_customer_count FROM orders

@@ -70,6 +70,23 @@ def _with_key_fallback(api_keys: list[str], call_with_key):
     ) from None
 
 
+import time
+from contextvars import ContextVar
+
+_provider_telemetry: ContextVar[list[dict] | None] = ContextVar("_provider_telemetry", default=None)
+
+
+def reset_provider_telemetry() -> list[dict]:
+    records: list[dict] = []
+    _provider_telemetry.set(records)
+    return records
+
+
+def get_provider_telemetry() -> list[dict]:
+    records = _provider_telemetry.get()
+    return list(records) if records is not None else []
+
+
 def generate_sql(question: str, schema: dict, previous_error: str | None = None) -> ModelQuery:
     settings = get_settings()
     ordered_providers = [
@@ -89,12 +106,40 @@ def generate_sql(question: str, schema: dict, previous_error: str | None = None)
 
     # Always respect the user's explicit provider priority. Try the next
     # provider for transport, quota, availability, and malformed-output errors.
-    for _name, api_key, call in configured:
+    active_telemetry = _provider_telemetry.get()
+    for idx, (name, api_key, call) in enumerate(configured):
+        t0 = time.perf_counter()
         try:
-            return call(api_key)
-        except Exception:
+            result = call(api_key)
+            elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+            if active_telemetry is not None:
+                model_name = settings.nvidia_model if name == "nvidia" else settings.gemini_model
+                active_telemetry.append({
+                    "provider": name,
+                    "model": model_name,
+                    "status": "success",
+                    "latency_ms": elapsed_ms,
+                    "is_fallback": (idx > 0),
+                    "error": None,
+                    "tokens": getattr(result, "_usage", None),
+                })
+            return result
+        except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+            if active_telemetry is not None:
+                model_name = settings.nvidia_model if name == "nvidia" else settings.gemini_model
+                active_telemetry.append({
+                    "provider": name,
+                    "model": model_name,
+                    "status": "error",
+                    "latency_ms": elapsed_ms,
+                    "is_fallback": (idx > 0),
+                    "error": type(exc).__name__,
+                    "tokens": None,
+                })
             continue
     raise ModelProvidersUnavailable("All configured model providers failed.") from None
+
 
 
 def generate_summary(question: str, evidence: dict) -> str:
@@ -198,7 +243,8 @@ def _call_nvidia(api_key: str, model_name: str, question: str, schema: dict, pre
         timeout=45,
     )
     response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
+    resp_json = response.json()
+    content = resp_json["choices"][0]["message"]["content"]
     try:
         data = json.loads(content)
     except (TypeError, json.JSONDecodeError):
@@ -206,5 +252,10 @@ def _call_nvidia(api_key: str, model_name: str, question: str, schema: dict, pre
         if not match:
             raise ValueError("NVIDIA model did not return the required JSON query.") from None
         data = json.loads(match.group(0))
-    return ModelQuery.model_validate(data)
+    query = ModelQuery.model_validate(data)
+    usage = resp_json.get("usage")
+    if usage:
+        object.__setattr__(query, "_usage", usage)
+    return query
+
 

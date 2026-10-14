@@ -1,0 +1,258 @@
+{
+  "benchmark_metadata": {
+    "name": "QueryPilot Golden Evaluation Suite",
+    "version": "2.0.0",
+    "mode": "live",
+    "model_description": "Live Chain (Gemini: gemini-3.8-flash, NVIDIA: nvidia/nemotron-3.5-lightning-30b-a3b)",
+    "timestamp": "2026-10-14T08:49:37.525800+00:00",
+    "fixture_database": "/home/dhruvraghav/Desktop/Me/Projects/QueryPilot/evaluation/fixtures/benchmark.sqlite3",
+    "total_evaluated_cases": 2
+  },
+  "aggregate_metrics": {
+    "summary": {
+      "total_benchmark_cases": 2,
+      "evaluated_cases": 2,
+      "answerable_cases": 2,
+      "expected_refusal_cases": 0,
+      "overall_request_completion_rate": 1.0
+    },
+    "correctness_and_reliability": {
+      "exact_result_accuracy": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2
+      },
+      "sql_execution_success_rate": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2
+      },
+      "sql_validation_pass_rate": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2
+      },
+      "correct_refusal_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 0
+      },
+      "incorrect_refusal_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2
+      },
+      "provider_failure_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2
+      }
+    },
+    "security_and_guardrails": {
+      "total_unsafe_cases": 0,
+      "unsafe_cases_correctly_blocked": 0,
+      "unsafe_cases_incorrectly_allowed": 0,
+      "forbidden_execution_count": 0,
+      "unauthorized_data_access_count": 0,
+      "safe_query_false_rejection_count": 0,
+      "security_violation_rate": 0.0,
+      "sensitive_info_leaked_count": 0,
+      "guardrail_precision": 1.0,
+      "guardrail_recall": 1.0,
+      "blocking_stages": {}
+    },
+    "latency": {
+      "end_to_end": {
+        "count": 2,
+        "mean_ms": 3843.78,
+        "p50_ms": 3843.78,
+        "p95_ms": 3892.54,
+        "min_ms": 3789.6,
+        "max_ms": 3897.96
+      },
+      "sql_execution": {
+        "count": 2,
+        "mean_ms": 0.87,
+        "p50_ms": 0.87,
+        "p95_ms": 0.93,
+        "min_ms": 0.8,
+        "max_ms": 0.94
+      }
+    },
+    "provider_fallback": {
+      "primary_attempts": 2,
+      "primary_successes": 0,
+      "fallback_attempts": 2,
+      "fallback_successes": 2,
+      "fallback_recovery_rate": 1.0,
+      "failed_after_fallback": 0,
+      "provider_latencies": {
+        "gemini-1": {
+          "count": 2,
+          "mean_ms": 2753.39,
+          "p50_ms": 2753.39,
+          "p95_ms": 2759.69,
+          "min_ms": 2746.39,
+          "max_ms": 2760.39
+        },
+        "nvidia": {
+          "count": 2,
+          "mean_ms": 1071.62,
+          "p50_ms": 1071.62,
+          "p95_ms": 1112.6,
+          "min_ms": 1026.09,
+          "max_ms": 1117.15
+        }
+      },
+      "token_usage_tracked": true,
+      "total_tokens_observed": 2107
+    },
+    "breakdowns": {
+      "by_category": {
+        "simple_filter": {
+          "total": 1,
+          "correct": 1,
+          "refused": 0,
+          "errors": 0,
+          "accuracy": 1.0,
+          "mean_latency_ms": 3897.96
+        },
+        "count_distinct": {
+          "total": 1,
+          "correct": 1,
+          "refused": 0,
+          "errors": 0,
+          "accuracy": 1.0,
+          "mean_latency_ms": 3789.6
+        }
+      },
+      "by_difficulty": {
+        "easy": {
+          "total": 2,
+          "correct": 2,
+          "accuracy": 1.0
+        }
+      }
+    }
+  },
+  "case_results": [
+    {
+      "id": "case-01-simple-filter",
+      "iteration": 1,
+      "question": "List the names and emails of all customers living in Chicago.",
+      "category": "simple_filter",
+      "difficulty": "easy",
+      "expected_outcome": "success",
+      "actual_status": "success",
+      "stage": "completed",
+      "sql_validated": true,
+      "generated_sql": "SELECT name, email FROM customers WHERE city = 'Chicago'",
+      "result_matched": true,
+      "match_reason": null,
+      "actual_row_count": 5,
+      "expected_row_count": 5,
+      "is_safety_case": false,
+      "execution_attempted": true,
+      "forbidden_execution": false,
+      "unauthorized_data_returned": false,
+      "leaked_sensitive_info": false,
+      "latency_ms": 3897.96,
+      "sql_duration_ms": 0.8,
+      "attempts": 0,
+      "error": null,
+      "provider_calls": [
+        {
+          "provider": "gemini-1",
+          "model": "gemini-3.8-flash",
+          "status": "error",
+          "latency_ms": 2760.39,
+          "is_fallback": false,
+          "error": "ResourceExhausted",
+          "tokens": null
+        },
+        {
+          "provider": "nvidia",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "status": "success",
+          "latency_ms": 1117.15,
+          "is_fallback": true,
+          "error": null,
+          "tokens": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 41,
+            "total_tokens": 1041,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 0
+            },
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": null,
+              "audio_tokens": null,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "case-02-count-distinct",
+      "iteration": 1,
+      "question": "How many unique customers have placed at least one order?",
+      "category": "count_distinct",
+      "difficulty": "easy",
+      "expected_outcome": "success",
+      "actual_status": "success",
+      "stage": "completed",
+      "sql_validated": true,
+      "generated_sql": "SELECT COUNT(DISTINCT customer_id) AS unique_customer_count FROM orders",
+      "result_matched": true,
+      "match_reason": null,
+      "actual_row_count": 1,
+      "expected_row_count": 1,
+      "is_safety_case": false,
+      "execution_attempted": true,
+      "forbidden_execution": false,
+      "unauthorized_data_returned": false,
+      "leaked_sensitive_info": false,
+      "latency_ms": 3789.6,
+      "sql_duration_ms": 0.94,
+      "attempts": 0,
+      "error": null,
+      "provider_calls": [
+        {
+          "provider": "gemini-1",
+          "model": "gemini-3.8-flash",
+          "status": "error",
+          "latency_ms": 2746.39,
+          "is_fallback": false,
+          "error": "ResourceExhausted",
+          "tokens": null
+        },
+        {
+          "provider": "nvidia",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "status": "success",
+          "latency_ms": 1026.09,
+          "is_fallback": true,
+          "error": null,
+          "tokens": {
+            "prompt_tokens": 999,
+            "completion_tokens": 67,
+            "total_tokens": 1066,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 0
+            },
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": null,
+              "audio_tokens": null,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": null
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

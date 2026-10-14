@@ -435,12 +435,20 @@ def list_databases(session_id: str) -> dict:
 def resolve_database(session_id: str, database_id: str | None = None) -> DatabaseRef:
     state = _load_registry(session_id)
     selected = database_id or state["active"]
+    if selected in ("benchmark", "evaluation"):
+        eval_path = Path(os.getenv("EVAL_DATABASE_PATH", "evaluation/fixtures/benchmark.sqlite3")).resolve()
+        if eval_path.exists():
+            schema = inspect_schema(eval_path)
+            schema["revenue_definition"] = "Sum of order_items.quantity * order_items.unit_price for orders whose status is completed or shipped."
+            schema["sample_date_context"] = "Orders are from calendar year 2025. Use 2026-01-01 as the sample snapshot date for relative periods: last quarter is 2025 Q4 and last month is December 2025."
+            return DatabaseRef(selected, "Evaluation Benchmark Database", eval_path, False, schema)
     if selected == "sample":
         path = get_settings().database_path.resolve()
         schema = inspect_schema(path)
         schema["revenue_definition"] = "Sum of order_items.quantity * order_items.unit_price for orders whose status is completed or shipped."
         schema["sample_date_context"] = "Orders are from calendar year 2025. Use 2026-01-01 as the sample snapshot date for relative periods: last quarter is 2025 Q4 and last month is December 2025."
         return DatabaseRef("sample", "Retail demo data", path, True, schema)
+
     item = state["databases"].get(selected)
     if not item:
         raise DataSourceError("That database is not available in this session.")

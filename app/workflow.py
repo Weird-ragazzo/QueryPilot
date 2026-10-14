@@ -1,7 +1,9 @@
 import time
 import re
+import sqlite3
 import uuid
 from typing import TypedDict, Any
+
 from langgraph.graph import StateGraph, END
 from .config import get_settings
 from .database import open_readonly
@@ -120,8 +122,8 @@ def build_graph(model_fn=generate_sql, summary_fn=generate_summary):
             deadline = started + settings.query_timeout_ms / 1000
             con.set_progress_handler(lambda: 1 if time.perf_counter() > deadline else 0, 1000)
             # SQLite authorizer applies a second table/column allowlist at execution time.
-            import sqlite3
             allowed = {t.casefold(): {col.casefold() for col in meta["columns"]} for t, meta in ref.schema["tables"].items()}
+
             allowed_views = {v.casefold(): {col.casefold() for col in meta["columns"]} for v, meta in ref.schema.get("views", {}).items()}
             def authorize(action, arg1, arg2, db, source):
                 if action == sqlite3.SQLITE_READ:
